@@ -1,0 +1,435 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  COUNSELOR
+  STUDENT
+  PARENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+}
+
+enum DeadlineType {
+  ED
+  EA
+  REA
+  RD
+  ROLLING
+}
+
+enum CollegeStatus {
+  RESEARCHING
+  APPLYING
+  SUBMITTED
+  ACCEPTED
+  DENIED
+  WAITLISTED
+}
+
+enum FileCategory {
+  ESSAY
+  RESUME
+  TRANSCRIPT
+  OTHER
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  password      String?   // Hashed password for credentials auth (optional, nullable for OAuth users)
+  role          UserRole  @default(STUDENT)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  accounts         Account[]
+  sessions         Session[]
+  studentProfile   StudentProfile?
+  parentProfile    ParentProfile?
+  counselorProfile CounselorProfile?
+  
+  // Created invites (admin only)
+  createdInvites   Invite[] @relation("InviteCreator")
+  
+  // Tasks
+  createdTasks     Task[] @relation("TaskCreator")
+  
+  // File uploads
+  uploadedFiles    FileUpload[]
+  
+  // Chat
+  chatMessages            ChatMessage[]
+  chatThreadParticipants  ChatThreadParticipant[]
+  
+  // Essays
+  createdEssays    Essay[]
+  essayVersions    EssayVersion[]
+  essayComments    EssayComment[]
+  
+  // Intake forms
+  intakeResponses  IntakeResponse[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Invite {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  email        String
+  role         UserRole
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime @default(now())
+  createdById  String
+  
+  // Optional links
+  studentId    String? // Link parent to student, or assign counselor to student
+  counselorId  String? // For counselor assignment
+  
+  createdBy    User     @relation("InviteCreator", fields: [createdById], references: [id])
+
+  @@map("invites")
+}
+
+model StudentProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Relations
+  parentLinks        ParentStudentLink[]
+  counselorAssignments StudentCounselorAssignment[]
+  tasks              Task[]
+  deadlines          Deadline[]
+  fileUploads        FileUpload[]
+  chatThread         ChatThread?
+  intakeResponses    IntakeResponse[]
+  colleges           College[]
+  essays             Essay[]
+
+  @@map("student_profiles")
+}
+
+model ParentProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Relations
+  studentLinks ParentStudentLink[]
+
+  @@map("parent_profiles")
+}
+
+model ParentStudentLink {
+  id        String   @id @default(cuid())
+  parentId  String
+  studentId String
+  createdAt DateTime @default(now())
+
+  parent  ParentProfile @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, studentId])
+  @@map("parent_student_links")
+}
+
+model CounselorProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  calendly30Url String?  // 30-minute session link
+  calendly60Url String?  // 60-minute session link
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Relations
+  studentAssignments StudentCounselorAssignment[]
+
+  @@map("counselor_profiles")
+}
+
+model StudentCounselorAssignment {
+  id          String   @id @default(cuid())
+  studentId   String
+  counselorId String
+  createdAt   DateTime @default(now())
+
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  counselor CounselorProfile @relation(fields: [counselorId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, counselorId])
+  @@map("student_counselor_assignments")
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  studentId   String
+  createdById String
+  title       String
+  description String?
+  dueDate     DateTime
+  status      TaskStatus @default(PENDING)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  student  StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  creator  User            @relation("TaskCreator", fields: [createdById], references: [id])
+
+  @@map("tasks")
+}
+
+model Deadline {
+  id        String       @id @default(cuid())
+  studentId String
+  title     String
+  type      DeadlineType
+  dueDate   DateTime
+  notes     String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("deadlines")
+}
+
+model FileUpload {
+  id        String       @id @default(cuid())
+  studentId String
+  uploadedById String
+  category  FileCategory
+  name      String
+  url       String
+  size      Int?
+  mimeType  String?
+  createdAt DateTime     @default(now())
+
+  student    StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  uploadedBy User            @relation(fields: [uploadedById], references: [id])
+
+  @@map("file_uploads")
+}
+
+model ChatThread {
+  id        String   @id @default(cuid())
+  studentId String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student       StudentProfile          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  messages      ChatMessage[]
+  participants  ChatThreadParticipant[]
+
+  @@map("chat_threads")
+}
+
+model ChatThreadParticipant {
+  id        String   @id @default(cuid())
+  threadId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, userId])
+  @@map("chat_thread_participants")
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  authorId  String
+  body      String   @db.Text
+  attachmentUrl String?
+  createdAt DateTime @default(now())
+
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author User       @relation(fields: [authorId], references: [id])
+
+  @@map("chat_messages")
+}
+
+model IntakeResponse {
+  id        String   @id @default(cuid())
+  studentId String
+  userId    String   // Who filled it out (student or parent)
+  data      Json     // Store form data as JSON
+  reviewed  Boolean  @default(false)
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  user    User           @relation(fields: [userId], references: [id])
+
+  @@map("intake_responses")
+}
+
+model College {
+  id          String        @id @default(cuid())
+  studentId   String
+  name        String
+  deadlineType DeadlineType
+  deadlineDate DateTime
+  status      CollegeStatus @default(RESEARCHING)
+  notes       String?       @db.Text
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("colleges")
+}
+
+model Essay {
+  id        String   @id @default(cuid())
+  studentId String
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student  StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  versions EssayVersion[]
+
+  @@map("essays")
+}
+
+model EssayVersion {
+  id        String   @id @default(cuid())
+  essayId   String
+  versionNumber Int
+  authorId  String
+  content   String?  @db.Text
+  fileUrl   String?
+  createdAt DateTime @default(now())
+
+  essay    Essay         @relation(fields: [essayId], references: [id], onDelete: Cascade)
+  author   User          @relation(fields: [authorId], references: [id])
+  comments EssayComment[]
+
+  @@unique([essayId, versionNumber])
+  @@map("essay_versions")
+}
+
+model EssayComment {
+  id            String   @id @default(cuid())
+  essayVersionId String
+  authorId      String
+  body          String   @db.Text
+  isPrivate     Boolean  @default(false) // Private notes vs shared notes
+  createdAt     DateTime @default(now())
+
+  essayVersion EssayVersion @relation(fields: [essayVersionId], references: [id], onDelete: Cascade)
+  author       User         @relation(fields: [authorId], references: [id])
+
+  @@map("essay_comments")
+}
+
+model NotificationLog {
+  id        String   @id @default(cuid())
+  type      String   // invite_created, task_assigned, deadline_reminder, new_message
+  userId    String?
+  email     String
+  sentAt    DateTime @default(now())
+  success   Boolean  @default(true)
+  error     String?  @db.Text
+  metadata  Json?    // Store additional data
+
+  @@map("notification_logs")
+}
+
+// Payment placeholders (not implemented yet)
+model Plan {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  interval    String   // monthly, yearly
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id        String   @id @default(cuid())
+  userId    String   // Student or parent user ID
+  planId    String
+  status    String   // active, cancelled, expired
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}

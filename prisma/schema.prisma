@@ -80,7 +80,6 @@ model User {
   chatThreadParticipants  ChatThreadParticipant[]
   
   // Essays
-  createdEssays    Essay[]
   essayVersions    EssayVersion[]
   essayComments    EssayComment[]
   
